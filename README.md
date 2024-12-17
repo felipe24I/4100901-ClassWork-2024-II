@@ -1,67 +1,84 @@
 # Emulador de Luces de Parqueo y Direccionales en un STM32 (Nucleo)
 
-Este documento describe una arquitectura de referencia para emular el comportamiento de las luces de parqueo (hazard) y direccionales en una placa STM32 (por ejemplo, Nucleo). Se busca que la solución sea mantenible, escalable y fácil de entender, sirviendo como guía para estudiantes que estén cursando una asignatura de estructuras computacionales orientada al desarrollo de firmware embebido.
+Este documento describe una arquitectura de referencia para emular el comportamiento de las luces de parqueo (hazard) y direccionales en una placa STM32 (por ejemplo, Nucleo). La solución propuesta es mantenible, escalable y fácil de entender, ofreciendo un ejemplo didáctico para la asignatura de estructuras computacionales y desarrollo embebido.
 
 ## Objetivos
 
-- **Luces de Parqueo (Hazard):** Las luces parpadean de forma continua mientras el modo hazard está activado. Se activa y desactiva con un evento (por ejemplo, un botón o un comando UART).
-  
+- **Luces de Parqueo:**
+  Las luces parpadean de forma continua mientras el modo hazard está activado. Un evento (botón o comando UART) activa o desactiva este modo.
+
 - **Direccionales con Comportamiento Inteligente:**
-  - Una pulsación del botón de direccional (izquierda o derecha) hace que la luz parpadee 3 veces.
-  - Dos pulsaciones consecutivas (en un intervalo de 300ms) hacen que la direccional parpadee indefinidamente hasta que se reciba el comando de detener.
-  
-Este comportamiento se asemeja a sistemas de ayuda de giro en algunos vehículos modernos como el [Tesla Model 3](https://www.youtube.com/watch?v=3wZVLvbsBrc), donde una pulsación corta de la palanca de direccionales produce un parpadeo corto (3 veces) y una pulsación más firme inicia el parpadeo continuo.
+  - Una pulsación simple del botón de direccional (izquierda o derecha) produce que la luz correspondiente parpadee 3 veces y luego se detenga.
+  - Dos pulsaciones consecutivas rápidas del botón de direccional hacen que el parpadeo sea indefinido hasta recibir un comando de parada.
+  - **Condición adicional:** Si está activa la direccional de un lado (ej. izquierda) de forma indefinida y se recibe un evento del otro lado (ej. se presiona el botón derecho), esto se interpreta como comando de parar la direccional actual.
+
+Este comportamiento se asemeja a sistemas de ayuda de giro en algunos vehículos modernos como el [Tesla Model 3](https://www.youtube.com/watch?v=3wZVLvbsBrc), donde una pulsación corta de la palanca de direccionales produce un parpadeo corto (3 veces) y una pulsación más firme inicia el parpadeo continuo. También si la direccional izquierda está encendida y el conductor toca la direccional derecha, se interpreta que desea cancelar la izquierda, deteniendo el parpadeo.
 
 ## Arquitectura Propuesta
 
-La arquitectura se basa en una división por capas y en la implementación de una Máquina de Estados Finita (FSM):
+La arquitectura se basa en capas de abstracción y una Máquina de Estados Finita (FSM):
 
-1. **Capa de Abstracción de Hardware (HAL):**
-   - `gpio.[c/h]`: Configuración de pines, funciones primitivas para encender/apagar LEDs y leer botones.
-   - `uart.[c/h]`: Configuración y funciones de envío/recepción de datos por UART.
-   - `systick.[c/h]`: Uso del SysTick para contar milisegundos y proporcionar temporización.
+1. **Capa HAL (Abstracción de Hardware):**  
+   - `gpio.[c/h]`: Configuración de pines, acceso básico a LEDs y botones.  
+   - `uart.[c/h]`: Comunicación UART (opcional, para comandos remotos).  
+   - `systick.[c/h]`: Temporización básica con SysTick.
 
-2. **Capa de Drivers Específicos:**
-   - `led_driver.[c/h]`: Funciones para realizar patrones de parpadeo. Por ejemplo, `led_driver_toggle_left()`, `led_driver_toggle_right()`, `led_driver_toggle_both()`, `led_driver_all_off()`.
-   - `button_driver.[c/h]`: Lectura de estados de los botones de direccionales y hazard, detección de pulsaciones simples y dobles (tiempo entre pulsaciones), y antirrebote.
-   - `commands.[c/h]` (opcional): Interpretar comandos UART para activar/desactivar hazard o detener el parpadeo infinito.
+2. **Drivers Específicos:**  
+   - `led_driver.[c/h]`: Funciones de más alto nivel para encender, apagar o alternar LEDs según el lado y el patrón deseado.  
+   - `button_driver.[c/h]`: Detección de eventos de botón (simple, doble pulsación), eventos de hazard, y ahora también manejo del evento que detiene la direccional opuesta.  
+   - `commands.[c/h]` (opcional): Interpretación de comandos UART para activar/desactivar hazard o detener direccionales infinitas.
 
-3. **Capa de Lógica de Aplicación (FSM):**
-   - `parking_lights.[c/h]`: Contiene la lógica principal. Define los estados, las transiciones y la lógica temporal:
-     - **Estados Ejemplo:**
-       - `STATE_OFF`: Sin luces encendidas.
-       - `STATE_HAZARD`: Parpadeo continuo de las luces.
-       - `STATE_TURN_LEFT_3BLINKS`: Parpadeo 3 veces del lado izquierdo.
-       - `STATE_TURN_LEFT_INFINITE`: Parpadeo indefinido del lado izquierdo.
-       - `STATE_TURN_RIGHT_3BLINKS`: Parpadeo 3 veces del lado derecho.
-       - `STATE_TURN_RIGHT_INFINITE`: Parpadeo indefinido del lado derecho.
-     
-     Cada estado ajusta las salidas (LEDs) y depende de eventos (botones, UART, tiempo) para transicionar. Por ejemplo, si se detecta una pulsación doble en el botón izquierdo estando en `STATE_OFF`, se transita a `STATE_TURN_LEFT_INFINITE`. Para detener este estado, un comando o una pulsación distinta moverá el estado de vuelta a `STATE_OFF`.
+3. **Capa de Lógica de Aplicación (FSM):**  
+   - `parking_lights.[c/h]`: Aquí se define la FSM y su comportamiento. Estados propuestos:
+     - `STATE_OFF`
+     - `STATE_HAZARD`
+     - `STATE_TURN_LEFT_3BLINKS`
+     - `STATE_TURN_LEFT_INFINITE`
+     - `STATE_TURN_RIGHT_3BLINKS`
+     - `STATE_TURN_RIGHT_INFINITE`
 
-## Ejemplo Simplificado de la Máquina de Estados
+## Lógica de la Máquina de Estados
+
+- **Ejemplos de Estados y Transiciones:**
+
+  | Estado                         | Evento                      | Nuevo Estado              |
+  |--------------------------------|-----------------------------|---------------------------|
+  | OFF                            | hazard botón o comando      | HAZARD                    |
+  | OFF                            | dir. izq (1 pulsación)      | TURN_LEFT_3BLINKS         |
+  | OFF                            | dir. izq (2 pulsaciones)    | TURN_LEFT_INFINITE        |
+  | OFF                            | dir. der (1 pulsación)      | TURN_RIGHT_3BLINKS        |
+  | OFF                            | dir. der (2 pulsaciones)    | TURN_RIGHT_INFINITE       |
+  | HAZARD                         | hazard botón o comando      | OFF                       |
+  | TURN_LEFT_3BLINKS              | completar 3 parpadeos       | OFF                       |
+  | TURN_LEFT_INFINITE             | comando stop / dir. der     | OFF                       |
+  | TURN_RIGHT_3BLINKS             | completar 3 parpadeos       | OFF                       |
+  | TURN_RIGHT_INFINITE            | comando stop / dir. izq     | OFF                       |
+
+- **Manejo del Evento "Parar":**  
+  En los estados `TURN_LEFT_INFINITE` y `TURN_RIGHT_INFINITE`, además del comando stop (por UART u otro), una pulsación de la direccional opuesta también detiene la parpadeante actual. Por ejemplo, si estás en `TURN_LEFT_INFINITE` y se pulsa la direccional derecha (ya sea simple o doble vez), se interpreta como una orden de parar y el estado retorna a `OFF`.  
+  De igual forma, si estás en `TURN_RIGHT_INFINITE` y se presiona la direccional izquierda, el estado se mueve a `OFF`.
+
+- **Lógica de Tiempo:**
+
+  * El SysTick o un timer sirve para contar milisegundos. Por ejemplo, cada periodo dado en ms se alterna el estado de la luz (encendido/apagado) para generar el parpadeo. [Ver (ECE/SAE/FMVS)]
+  * Para los patrones de 3 parpadeos, se lleva un conteo interno (ej: cada toggle cuenta como medio ciclo de parpadeo; 6 toggles = 3 parpadeos on/off).
+
+## Ejemplo de Código Simplificado
 
 ```c
-typedef enum {
-    STATE_OFF,
-    STATE_HAZARD,
-    STATE_TURN_LEFT_3BLINKS,
-    STATE_TURN_LEFT_INFINITE,
-    STATE_TURN_RIGHT_3BLINKS,
-    STATE_TURN_RIGHT_INFINITE
-} parking_light_state_t;
+switch (current_state) {
+    case STATE_TURN_LEFT_INFINITE:
+        // blink Left Light 
+        if (stop_command || right_evt == BUTTON_SINGLE_PRESS || right_evt == BUTTON_DOUBLE_PRESS) {
+            enter_state(STATE_OFF);
+        }
+        break;
+
+    case STATE_TURN_RIGHT_INFINITE:
+        // blink Left Light
+        if (stop_command || left_evt == BUTTON_SINGLE_PRESS || left_evt == BUTTON_DOUBLE_PRESS) {
+            enter_state(STATE_OFF);
+        }
+        break;
+}
 ```
-
-### Transiciones Ejemplo:
-
-```
-OFF + botón hazard → HAZARD
-OFF + botón izq (1 pulsación) → TURN_LEFT_3BLINKS
-OFF + botón izq (2 pulsaciones rápidas) → TURN_LEFT_INFINITE
-TURN_LEFT_3BLINKS → al cumplir 3 parpadeos → OFF
-TURN_LEFT_INFINITE + comando "stop" → OFF
-```
-
-### Lógica de Tiempo:
-
-* El SysTick o un timer sirve para contar milisegundos. Por ejemplo, cada 500 ms se alterna el estado de la luz (encendido/apagado) para generar el parpadeo.
-* Para los patrones de 3 parpadeos, se lleva un conteo interno (ej: cada toggle cuenta como medio ciclo de parpadeo; 6 toggles = 3 parpadeos on/off).
