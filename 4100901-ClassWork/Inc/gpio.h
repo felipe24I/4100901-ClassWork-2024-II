@@ -42,4 +42,8 @@ void init_gpio_pin(GPIO_t *GPIOx, uint8_t pin, uint8_t mode);
 void configure_gpio(void);
 
 uint8_t gpio_button_is_pressed(void);
+uint8_t gpio_button1_is_pressed(void);
+uint8_t gpio_button2_is_pressed(void);
 void gpio_toggle_led(void);
+void gpio_toggle_led1(void);
+void gpio_toggle_led2(void);
