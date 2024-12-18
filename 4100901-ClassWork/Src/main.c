@@ -26,9 +26,7 @@ int main(void)
 
     UART_send_string(USART2, "Hello World, from main!\r\n");
 
-    uint8_t command = 0;
-
-    UART_receive_it(USART2, &command, 1);
+    extern uint8_t rx_byte;
 
     uint32_t hearbeat_tick = 0;
     while (1) {
@@ -37,12 +35,12 @@ int main(void)
             check_button_event(); // Check for button press events every 500 ms
             gpio_toggle_led();
         }
-        if (command != 0) {
-            UART_receive_it(USART2, &command, 1);
+        if (rx_byte != 0) {
+            uint8_t command = rx_byte;
             UART_send_string(USART2, "Command received: ");
             UART_send_char(USART2, command);
             UART_send_string(USART2, "\r\n");
-            command = 0; // Reset command
+            rx_byte = 0; // Reset command
         }
         
         // TODO: Run the FSM here       

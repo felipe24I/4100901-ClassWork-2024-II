@@ -3,6 +3,10 @@
 
 #include "nvic.h"
 
+uint8_t rx_byte = 0;
+
+void UART_receive_it(USART_TypeDef * UARTx);
+
 void UART_clock_enable(USART_TypeDef * UARTx) {
     if (UARTx == USART1) {
         *RCC_APB2ENR |= RCC_APB2ENR_USART1EN;
@@ -44,6 +48,8 @@ void UART_Init (USART_TypeDef * UARTx) {
 
     // Verify that USART is ready for reception
     while ((UARTx->ISR & USART_ISR_REACK) == 0);
+
+    UART_receive_it(UARTx);
 }
 
 void UART_send_char(USART_TypeDef * UARTx, char ch) {
@@ -87,20 +93,15 @@ void UART_enable_nvic_it(USART_TypeDef * UARTx) {
     }
 }
 
-uint8_t *rx_buffer;
-uint8_t rx_len;
-uint8_t rx_index;
-uint8_t rx_ready;
-void UART_receive_it(USART_TypeDef * UARTx, uint8_t *buffer, uint8_t len)
+void UART_receive_it(USART_TypeDef * UARTx)
 {
+    uint8_t dummy = UARTx->RDR; // Read RDR to clear RXNE flag
     UART_enable_nvic_it(UARTx);
     // Enable receive interrupt
     UARTx->CR1 |= (1 << 5);
-    // Set buffer and length
-    rx_buffer = buffer;
-    rx_len = len;
-    rx_index = 0;
 }
+
+
 void USART2_IRQHandler(void)
 {
     // Check if the USART2 receive interrupt flag is set
@@ -109,12 +110,6 @@ void USART2_IRQHandler(void)
         // Clear the interrupt flag
         USART2->ICR |= (1 << 5);
         // Read received data
-        rx_buffer[rx_index] = USART2->RDR;
-        rx_index++;
-        if (rx_index == rx_len) {
-            // Disable receive interrupt
-            USART2->CR1 &= ~(1 << 5);
-            rx_ready = 1;
-        }
+        rx_byte = USART2->RDR;
     }
 }
