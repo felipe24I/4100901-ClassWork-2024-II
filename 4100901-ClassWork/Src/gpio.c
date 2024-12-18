@@ -1,6 +1,8 @@
 #include "gpio.h"
 #include "rcc.h"
 
+#include "systick.h"
+
 #define EXTI_BASE 0x40010400
 #define EXTI ((EXTI_t *)EXTI_BASE)
 
@@ -94,11 +96,24 @@ void gpio_toggle_led(void)
 {
     TOGGLE_LED();
 }
+uint32_t b1_tick = 0;
+void detect_button_press(void)
+{
+    if (systick_GetTick() - b1_tick < 50) {
+        return; // Ignore bounces of less than 50 ms
+    } else if (systick_GetTick() - b1_tick > 500) {
+        button_pressed = 1; // single press
+    } else {
+        button_pressed = 2; // double press
+    }
+
+    b1_tick = systick_GetTick();
+}
 
 void EXTI15_10_IRQHandler(void)
 {
     if (EXTI->PR1 & (1 << BUTTON_PIN)) {
         EXTI->PR1 = (1 << BUTTON_PIN); // Clear pending bit
-        button_pressed = 1; // Set button pressed flag
+        detect_button_press();
     }
 }
